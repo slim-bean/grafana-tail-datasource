@@ -19,8 +19,8 @@
     "url": "https://github.com/ryantxu/grafana-firebase-app.git"
   },
   "devDependencies": {
-    "@grafana/ui": "latest",
-    "@grafana/data": "latest",
-    "@grafana/toolkit": "next"
+    "@grafana/data": "^6.6.0",
+    "@grafana/toolkit": "^6.7.0-pre-249ae05281",
+    "@grafana/ui": "^6.6.0"
   }
 }

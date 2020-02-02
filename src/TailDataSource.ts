@@ -1,16 +1,24 @@
 // Types
-import { DataQueryRequest, DataQueryResponse, DataSourceApi, DataSourceInstanceSettings, DataStreamObserver } from '@grafana/ui';
+import { Observable, merge } from 'rxjs';
+import {
+  CircularDataFrame,
+  DataQueryRequest,
+  DataQueryResponse,
+  DataSourceApi,
+  DataSourceInstanceSettings,
+  FieldType,
+  LoadingState,
+} from '@grafana/data';
 
 import { TailQuery, TailOptions } from './types';
-import { FileWorker } from './FileWorker';
 
-export class TailDataSource extends DataSourceApi<TailQuery, TailOptions> {
+export class TailDataSource extends DataSourceApi<TailQuery> {
   private base = '';
 
   constructor(private instanceSettings: DataSourceInstanceSettings<TailOptions>) {
     super(instanceSettings);
 
-    this.base = instanceSettings.url + '?path=';
+    this.base = instanceSettings.url + '?name=';
     if (instanceSettings.jsonData.prefix) {
       this.base += encodeURI(instanceSettings.jsonData.prefix);
     }
@@ -20,58 +28,63 @@ export class TailDataSource extends DataSourceApi<TailQuery, TailOptions> {
     return `Tail: ${query.path}`;
   }
 
-  query(options: DataQueryRequest<TailQuery>, observer: DataStreamObserver): Promise<DataQueryResponse> {
-    return new Promise((resolve, reject) => {
-      const workers = options.targets.map(query => {
-        if (!query.path) {
-          reject('Missing Path');
-          return;
-        }
-        let url = this.base + encodeURI(query.path);
-        if (query.head) {
-          url += '&head=' + encodeURIComponent(query.head);
-        } else if (this.instanceSettings.jsonData.head) {
-          url += '&head=' + encodeURIComponent(this.instanceSettings.jsonData.head);
-        }
-        console.log('QUERY', url, this);
-        return new FileWorker(url, query, options, observer);
+  query(options: DataQueryRequest<TailQuery>): Observable<DataQueryResponse> {
+    const streams: Array<Observable<DataQueryResponse>> = [];
+    for (const target of options.targets) {
+      const stream = new Observable<DataQueryResponse>(subscriber => {
+        const streamId = `fetch-${target.refId}`;
+        const maxDataPoints = 1000;
+
+        const data = new CircularDataFrame({
+          append: 'tail',
+          capacity: maxDataPoints,
+        });
+        data.refId = target.refId;
+        data.name = 'Fetch ' + target.refId;
+        data.addField({ name: 'time', type: FieldType.time });
+        data.addField({ name: 'value', type: FieldType.number });
+
+        let reader: ReadableStreamReader<Uint8Array>;
+
+        const processChunk = (value: ReadableStreamReadResult<Uint8Array>): any => {
+          if (value.value) {
+            const text = new TextDecoder().decode(value.value);
+            const parts = text.split(' ');
+            if (parts.length === 2) {
+              data.fields[0].values.add(new Date(Number(parts[0])));
+              data.fields[1].values.add(Number(parts[1]));
+            }
+          }
+
+          subscriber.next({
+            data: [data],
+            key: streamId,
+            state: value.done ? LoadingState.Done : LoadingState.Streaming,
+          });
+
+          if (value.done) {
+            console.log('Finished stream');
+            subscriber.complete(); // necessary?
+            return;
+          }
+
+          return reader.read().then(processChunk);
+        };
+
+        fetch(new Request(this.base + target.path)).then(response => {
+          reader = response.body!.getReader();
+          reader.read().then(processChunk);
+        });
+
+        return () => {
+          // Cancel fetch?
+          console.log('unsubscribing to stream ' + streamId);
+        };
       });
-      console.log('WORK:', workers);
-      resolve({ data: [] });
-    });
 
-    // return new Promise(resolve => {
-    //   let done = false;
-    //   const timeoutId = setTimeout(() => {
-    //     const series: SeriesData[] = [];
-    //     for (const worker of workers) {
-    //       worker.useStream = true;
-    //       if (worker.state.series && worker.state.state === LoadingState.Done) {
-    //         for (const s of worker.state.series) {
-    //           series.push(s);
-    //         }
-    //       }
-    //     }
-    //     if (!done) {
-    //       resolve({data: series});
-    //     }
-    //   }, 1000); // 1 second to finish, then start streaming
-
-    //   return Promise.all(workers).then(states => {
-    //     clearTimeout(timeoutId);
-
-    //     done = true;
-    //     const series: SeriesData[] = [];
-    //     for (const state of states) {
-    //       if (state.series) {
-    //         for (const s of state.series) {
-    //           series.push(s);
-    //         }
-    //       }
-    //     }
-    //     return {data: series};
-    //   });
-    // });
+      streams.push(stream);
+    }
+    return merge(...streams);
   }
 
   testDatasource() {

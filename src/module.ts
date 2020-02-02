@@ -1,4 +1,4 @@
-import { DataSourcePlugin } from '@grafana/ui';
+import { DataSourcePlugin } from '@grafana/data';
 
 import { TailDataSource } from './TailDataSource';
 import { TailQueryEditor } from './TailQueryEditor';
