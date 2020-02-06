@@ -17,6 +17,10 @@ export class TailQueryEditor extends PureComponent<Props, State> {
         const {onChange, query} = this.props;
         onChange({...query, path: event.target.value});
     };
+    onRateChange = (event: ChangeEvent<HTMLInputElement>) => {
+        const {onChange, query} = this.props;
+        onChange({...query, rate: event.target.value});
+    };
 
     render() {
         const {query} = this.props;
@@ -30,6 +34,14 @@ export class TailQueryEditor extends PureComponent<Props, State> {
                     value={query.path}
                     tooltip={'The HTTP request path'}
                     placeholder="/var/log/path.log"
+                />
+                <FormField
+                    label="Rate (ms)"
+                    labelWidth={6}
+                    onChange={this.onRateChange}
+                    value={query.rate}
+                    tooltip={'Min time between samples in milliseconds'}
+                    placeholder="100"
                 />
             </div>
         );
